@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>本地 → 服务器 链路测试</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1c2029; --line:#262b36; --txt:#e6e9ef;
+    --dim:#8b93a7; --ok:#3ddc97; --warn:#ffb454; --bad:#ff5f6d; --crit:#ff2d55; --accent:#5b8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif}
+  .wrap{max-width:920px;margin:0 auto;padding:22px 18px 60px}
+  .top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+  h1{font-size:19px;margin:0}
+  .sub{color:var(--dim);font-size:12.5px;margin:6px 0 16px}
+  .tabs{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);
+        border-radius:9px;padding:4px;width:max-content;margin-bottom:16px}
+  .tabs button{background:transparent;border:0;color:var(--dim);padding:7px 16px;border-radius:6px;
+               font-size:13px;font-weight:600;cursor:pointer}
+  .tabs button.on{background:var(--accent);color:#fff}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin-bottom:14px}
+  .card h2{font-size:12.5px;margin:0 0 12px;color:var(--dim);font-weight:600;
+           letter-spacing:.05em;text-transform:uppercase}
+  button.act{background:var(--accent);color:#fff;border:0;border-radius:7px;
+         padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer}
+  button.act:disabled{opacity:.45;cursor:default}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);
+               font-weight:500;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer}
+  button.ghost:hover{border-color:#3a4252}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-variant-numeric:tabular-nums}
+  .kv .k{color:var(--dim)}
+  .big{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums}
+  .unit{font-size:13px;color:var(--dim);font-weight:400}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13px}
+  th{color:var(--dim);font-weight:500;font-size:11.5px;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  td.n,th.n{text-align:right}
+  canvas{width:100%;display:block}
+  .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600}
+  .pill.ok{background:rgba(61,220,151,.15);color:var(--ok)}
+  .pill.warn{background:rgba(255,180,84,.15);color:var(--warn)}
+  .pill.bad{background:rgba(255,95,109,.15);color:var(--bad)}
+  .pill.crit{background:rgba(255,45,85,.18);color:var(--crit)}
+  .note{color:var(--dim);font-size:12px}
+  #log{font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);
+       max-height:150px;overflow:auto;white-space:pre-wrap}
+  .hidden{display:none!important}
+
+  /* 整体评价 */
+  .verdict{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .verdict .vlabel{font-size:22px;font-weight:700;letter-spacing:.01em}
+  .verdict.crit .vlabel{color:var(--crit)}
+  .verdict.bad .vlabel{color:var(--bad)}
+  .verdict.warn .vlabel{color:var(--warn)}
+  .verdict.ok .vlabel{color:var(--ok)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;margin-top:14px}
+  .tile{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .tile .t{color:var(--dim);font-size:11.5px;letter-spacing:.03em}
+  .tile .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+  .tile .val small{font-size:11.5px;color:var(--dim);font-weight:400}
+  ul.diag{margin:0;padding-left:18px}
+  ul.diag li{margin:5px 0;font-size:13px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:5px;
+       background:rgba(91,140,255,.14);color:#8fb0ff;margin-right:6px}
+  .tag.bad{background:rgba(255,45,85,.14);color:#ff8a9e}
+  .tag.ok{background:rgba(61,220,151,.14);color:#6fe3b0}
+  .empty{color:var(--dim);font-size:13px;padding:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>本地 → 服务器 链路测试</h1>
+  </div>
+  <div class="sub">测浏览器到你正在访问的这台服务器的真实链路：延迟、抖动、上下行速率、流式到达节奏。</div>
+
+  <div class="tabs">
+    <button id="tabTest" class="on">测试</button>
+    <button id="tabSum">汇总</button>
+  </div>
+
+  <!-- ================= 测试页 ================= -->
+  <div id="pageTest">
+    <div class="card">
+      <h2>当前链路</h2>
+      <div class="kv" id="env">
+        <div class="k">页面地址</div><div id="envUrl">—</div>
+        <div class="k">浏览器协商协议</div><div id="envProto">—</div>
+        <div class="k">服务器看到你的 IP</div><div id="envIp">—</div>
+        <div class="k">Cloudflare 边缘</div><div id="envCf">—</div>
+        <div class="k">浏览器估计的带宽</div><div id="envNet">—</div>
+        <div class="k">页面版本</div><div id="envVer">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="run" class="act">开始测试</button>
+        <button id="runAll" class="ghost">全部（约 40 秒）</button>
+        <span id="status" class="note" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>延迟 RTT（复用连接）</h2>
+      <div class="row" style="align-items:baseline;gap:14px">
+        <div class="big" id="rttMed">—<span class="unit"> ms</span></div>
+        <div class="note" style="margin:0" id="rttDetail">中位数 · 尚未测试</div>
+      </div>
+      <table style="margin-top:12px">
+        <tr><th>最小</th><th class="n">中位</th><th class="n">p90</th><th class="n">最大</th><th class="n">抖动 (σ)</th><th class="n">样本</th></tr>
+        <tr id="rttRow"><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+      </table>
+      <canvas id="rttChart" width="800" height="90" style="height:90px;margin-top:10px"></canvas>
+    </div>
+
+    <div class="card">
+      <h2>冷连接 RTT（含 DNS + TCP + TLS）</h2>
+      <div class="row" style="align-items:baseline;gap:14px">
+        <div class="big" id="coldMed">—<span class="unit"> ms</span></div>
+        <div class="note" style="margin:0" id="coldDetail">中位数 · 尚未测试</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>吞吐</h2>
+      <table>
+        <tr><th>方向</th><th class="n">大小</th><th class="n">耗时</th><th class="n">速率</th><th>判定</th></tr>
+        <tr><td>下行</td><td class="n" id="dlSize">—</td><td class="n" id="dlTime">—</td>
+            <td class="n" id="dlRate">—</td><td id="dlVerdict">—</td></tr>
+        <tr><td>上行</td><td class="n" id="ulSize">—</td><td class="n" id="ulTime">—</td>
+            <td class="n" id="ulRate">—</td><td id="ulVerdict">—</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>流式到达节奏</h2>
+      <div class="note" style="margin:0 0 10px">
+        服务器每 20ms 稳定写 8KB（约 400 KB/s）。客户端收到的间隔也均匀 → 链路正常；
+        成批到达、长时间空档 → 下行被缓冲/阻塞（这正是 SSE 卡住的形态）。
+      </div>
+      <table>
+        <tr><th>服务器写入</th><th class="n">客户端收到</th><th class="n">间隔中位</th>
+            <th class="n">最大空档</th><th>判定</th></tr>
+        <tr><td>均匀</td><td class="n" id="stCount">—</td><td class="n" id="stMed">—</td>
+            <td class="n" id="stMax">—</td><td id="stVerdict">—</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>日志</h2>
+      <div id="log">等待开始…</div>
+    </div>
+  </div>
+
+  <!-- ================= 汇总页 ================= -->
+  <div id="pageSum" class="hidden">
+    <div class="card">
+      <h2>整体评价</h2>
+      <div class="verdict" id="verdictBox">
+        <div class="vlabel" id="vLabel">尚无数据</div>
+        <div class="note" id="vNote">先到「测试」页跑一次。</div>
+      </div>
+      <div class="tiles" id="tiles">
+        <div class="tile"><div class="t">下行</div><div class="val" id="tDown">—</div></div>
+        <div class="tile"><div class="t">上行</div><div class="val" id="tUp">—</div></div>
+        <div class="tile"><div class="t">上/下行比</div><div class="val" id="tRatio">—</div></div>
+        <div class="tile"><div class="t">RTT 中位</div><div class="val" id="tRtt">—</div></div>
+        <div class="tile"><div class="t">流式倍数</div><div class="val" id="tStream">—</div></div>
+        <div class="tile"><div class="t">冷连接</div><div class="val" id="tCold">—</div></div>
+        <div class="tile"><div class="t">流式速率</div><div class="val" id="tStreamKbs">—</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>诊断结论</h2>
+      <ul class="diag" id="diag"><li class="note">尚无数据。</li></ul>
+    </div>
+
+    <div class="card">
+      <h2>速率趋势（最近 20 次）</h2>
+      <canvas id="histChart" width="840" height="120" style="height:120px"></canvas>
+      <div class="row" style="gap:18px;margin-top:8px">
+        <span class="note"><span style="color:#5b8cff">■</span> 下行 KB/s</span>
+        <span class="note"><span style="color:#3ddc97">■</span> 上行 KB/s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>指标汇总（全部记录）</h2>
+      <table id="aggTable">
+        <tr><th>指标</th><th class="n">最近</th><th class="n">中位</th><th class="n">最好</th><th class="n">最差</th><th class="n">样本</th></tr>
+      </table>
+      <div class="empty" id="aggEmpty">尚无记录。</div>
+    </div>
+
+    <div class="card">
+      <h2>历史记录</h2>
+      <table id="histTable">
+        <tr><th>时间</th><th class="n">RTT</th><th class="n">冷连</th><th class="n">下行</th>
+            <th class="n">上行</th><th class="n">上/下</th><th class="n">流式</th><th>评价</th><th></th></tr>
+      </table>
+      <div class="empty" id="histEmpty">尚无记录。</div>
+      <div class="row" style="margin-top:12px">
+        <button id="copySum" class="ghost">复制汇总</button>
+        <button id="exportJson" class="ghost">导出 JSON</button>
+        <button id="clearHist" class="ghost">清空历史</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const now = () => performance.now();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const BASE = location.origin;
+const STORE = 'lat_runs_v1';
+let busy = false;
+let lastRun = null;
+let runs = loadRuns();
+
+function log(msg){
+  const el = $('log');
+  if (el.textContent.startsWith('等待')) el.textContent = '';
+  const t = new Date().toTimeString().slice(0,8);
+  el.textContent += `[${t}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(s){ $('status').textContent = s; }
+function fmt(n, d=1){ return Number(n).toFixed(d); }
+function kb(n){ return n >= 1048576 ? fmt(n/1048576,2)+' MB' : fmt(n/1024,0)+' KB'; }
+function median(a){ if(!a.length) return NaN; const b=[...a].sort((x,y)=>x-y); const m=b.length>>1;
+  return b.length%2 ? b[m] : (b[m-1]+b[m])/2; }
+function pct(a,p){ if(!a.length) return NaN; const b=[...a].sort((x,y)=>x-y);
+  return b[Math.min(b.length-1, Math.floor(b.length*p))]; }
+function stdev(a){ if(a.length<2) return 0; const m=a.reduce((x,y)=>x+y,0)/a.length;
+  return Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/(a.length-1)); }
+function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+
+/* ---------- 分级 ---------- */
+function gradeRtt(ms){
+  if (!isFinite(ms)) return null;
+  if (ms<=100) return {c:'ok', t:'良好'};
+  if (ms<=300) return {c:'warn', t:'偏高'};
+  return {c:'bad', t:'高'};
+}
+function gradeRate(kbs){
+  if (!isFinite(kbs)) return null;
+  if (kbs>=500) return {c:'ok', t:'良好'};
+  if (kbs>=100) return {c:'warn', t:'偏慢'};
+  if (kbs>=3)   return {c:'bad', t:'很差'};
+  return {c:'crit', t:'阻塞'};
+}
+function gradeStream(ratio, gapMax){
+  if (!isFinite(ratio)) return null;
+  // 经 CDN 时每个分片常被拖到 25~35ms，1.3~1.5× 属正常；出现秒级空档才算卡。
+  if (isFinite(gapMax) && gapMax >= 3000) return {c:'bad', t:'秒级空档'};
+  if (ratio<=1.8 && (!isFinite(gapMax) || gapMax<1000)) return {c:'ok', t:'正常'};
+  if (ratio<=3)   return {c:'warn', t:'有缓冲'};
+  return {c:'bad', t:'严重阻塞'};
+}
+function pill(g, extra=''){ return g ? `<span class="pill ${g.c}">${g.t}</span>${extra?` <span class="note" style="margin:0">${extra}</span>`:''}` : '—'; }
+function rateVerdict(kbs){ return pill(gradeRate(kbs)); }
+
+/* ---------- 历史存取 ---------- */
+function loadRuns(){
+  try {
+    const a = JSON.parse(localStorage.getItem(STORE) || '[]');
+    return Array.isArray(a) ? a : [];
+  } catch(e){ return []; }
+}
+function saveRuns(){
+  try { localStorage.setItem(STORE, JSON.stringify(runs.slice(-60))); } catch(e){}
+}
+function pushRun(r){
+  runs.push(r);
+  if (runs.length > 60) runs = runs.slice(-60);
+  saveRuns();
+  lastRun = r;
+  renderSummary();
+}
+
+/* ---------- 整体评价 ---------- */
+function evaluate(r){
+  if (!r) return {level:'none', label:'尚无数据',
+    note:'先到「测试」页跑一次。'};
+  const down = r.down.kbs, up = r.up.kbs, str = r.stream.ratio;
+  const asym = up > 0 && down > 0 ? up/down : NaN;
+  const downG = gradeRate(down), strG = gradeStream(str, r.stream.gapMax);
+
+  // 已知故障形态：上行正常而下行被压到几 KB/s
+  if (isFinite(down) && down < 10 && isFinite(up) && up > 50 && asym > 5) {
+    return {level:'crit', label:'复现故障：下行被阻塞',
+      note:`下行 ${fmt(down,search1(down))} KB/s，上行 ${fmt(up,0)} KB/s，`+
+           `上行是下行的 ${fmt(asym,1)} 倍。这是典型的「下行被阻塞」故障形态。`};
+  }
+  if (isFinite(down) && down < 100 && isFinite(asym) && asym > 5) {
+    return {level:'bad', label:'下行偏慢且不对称',
+      note:`下行仅 ${fmt(down,down<10?2:0)} KB/s，上行 ${fmt(up,0)} KB/s（${fmt(asym,1)}×）。`+
+           `大响应会明显变慢，建议对照目标应用的卡顿现象复测。`};
+  }
+  if (downG && downG.c === 'crit') {
+    return {level:'crit', label:'下行严重受限',
+      note:`下行仅 ${fmt(down,1)} KB/s，任何流式回复都会被拖住。`};
+  }
+  if (strG && strG.c === 'bad') {
+    return {level:'bad', label:'流式被缓冲/阻塞',
+      note:`流式实测耗时是理论值的 ${fmt(str,2)} 倍，数据成批到达。`};
+  }
+  const upG = gradeRate(up);
+  const rttG = gradeRtt(r.rtt.med);
+  const issues = [];
+  if (rttG && rttG.c !== 'ok')
+    issues.push(`延迟${rttG.t}（RTT ${fmt(r.rtt.med,0)} ms，冷连接 ${fmt(r.cold.med,0)} ms）`);
+  if (downG && downG.c !== 'ok')
+    issues.push(`下行${downG.t}（${fmt(down,down<10?2:0)} KB/s）`);
+  if (upG && upG.c !== 'ok')
+    issues.push(`上行${upG.t}（${fmt(up,0)} KB/s）`);
+  if (strG && strG.c !== 'ok')
+    issues.push(`流式${strG.t}（${fmt(str,2)}×，最大空档 ${fmt(r.stream.gapMax,0)} ms）`);
+  if (issues.length) {
+    return {level:'warn', label:'部分指标异常',
+      note: issues.join('；') + '。大响应或长流式可能明显变慢。'};
+  }
+  return {level:'ok', label:'链路正常',
+    note:`下行 ${fmt(down,0)} KB/s、上行 ${fmt(up,0)} KB/s、RTT ${fmt(r.rtt.med,0)} ms、`+
+         `流式 ${fmt(str,2)}× 均在正常范围。若目标应用仍慢，`+
+         '瓶颈在该客户端连接或进程，不是本机出口。'};
+}
+function search1(v){ return v < 10 ? 2 : 1; }
+
+function renderSummary(){
+  const r = lastRun || (runs.length ? runs[runs.length-1] : null);
+  const ev = evaluate(r);
+  const box = $('verdictBox');
+  box.className = 'verdict ' + ev.level;
+  $('vLabel').textContent = ev.label;
+  $('vNote').textContent = ev.note;
+
+  if (r) {
+    $('tDown').innerHTML = fmt(r.down.kbs, r.down.kbs<10?2:0) + ' <small>KB/s</small>';
+    $('tUp').innerHTML   = fmt(r.up.kbs, r.up.kbs<10?2:0) + ' <small>KB/s</small>';
+    const asym = r.up.kbs>0 && r.down.kbs>0 ? r.up.kbs/r.down.kbs : NaN;
+    $('tRatio').textContent = isFinite(asym) ? fmt(asym,1)+'×' : '—';
+    $('tRtt').innerHTML   = (isFinite(r.rtt.med)?fmt(r.rtt.med,0):'—') + ' <small>ms</small>';
+    $('tStream').textContent = isFinite(r.stream.ratio) ? fmt(r.stream.ratio,2)+'×' : '—';
+    $('tCold').innerHTML  = (isFinite(r.cold.med)?fmt(r.cold.med,0):'—') + ' <small>ms</small>';
+    $('tStreamKbs').innerHTML = isFinite(r.stream.kbs)
+      ? fmt(r.stream.kbs, r.stream.kbs<10?2:0) + ' <small>KB/s</small>' : '—';
+  } else {
+    ['tDown','tUp','tRatio','tRtt','tStream','tCold','tStreamKbs'].forEach(id => $(id).textContent = '—');
+  }
+
+  renderDiag(r);
+  renderAgg();
+  renderHist();
+  drawHist();
+}
+
+function renderDiag(r){
+  const ul = $('diag');
+  if (!r) { ul.innerHTML = '<li class="note">尚无数据。</li>'; return; }
+  const items = [];
+  const asym = r.up.kbs>0 && r.down.kbs>0 ? r.up.kbs/r.down.kbs : NaN;
+  const downG = gradeRate(r.down.kbs), upG = gradeRate(r.up.kbs), rttG = gradeRtt(r.rtt.med);
+  const strG = gradeStream(r.stream.ratio, r.stream.gapMax);
+
+  items.push(`<span class="tag ${downG?downG.c:''}">下行</span> ` +
+    `${fmt(r.down.kbs, r.down.kbs<10?2:0)} KB/s（${kb(r.down.bytes)} / ${fmt(r.down.ms/1000,2)}s）→ ${downG?downG.t:'—'}`);
+
+  items.push(`<span class="tag ${upG?upG.c:''}">上行</span> ` +
+    `${fmt(r.up.kbs, r.up.kbs<10?2:0)} KB/s（${kb(r.up.bytes)} / ${fmt(r.up.ms/1000,2)}s）→ ${upG?upG.t:'—'}`);
+
+  if (isFinite(asym)) {
+    const bad = asym > 5 && r.down.kbs < 100;
+    items.push(`<span class="tag ${bad?'bad':'ok'}">对称性</span> ` +
+      `上行 / 下行 = <b>${fmt(asym,1)}×</b>` +
+      (bad ? ' —— 强不对称：发得出去、收不回来，指向受限或阻塞的下行。'
+           : ' —— 上下行大致匹配。'));
+  }
+
+  items.push(`<span class="tag ${rttG?rttG.c:''}">延迟</span> ` +
+    `RTT 中位 ${fmt(r.rtt.med,1)} ms，抖动 ${fmt(r.rtt.sd,1)} ms` +
+    `，冷连接 ${fmt(r.cold.med,1)} ms（多 ${fmt(Math.max(0, r.cold.med - r.rtt.med),1)} ms 用于建连）` +
+    ` → ${rttG?rttG.t:'—'}`);
+
+  items.push(`<span class="tag ${strG?strG.c:''}">流式</span> ` +
+    `服务器 ${r.stream.chunks}×${kb(r.stream.size)} 每 ${r.stream.interval}ms（理论 ${fmt(r.stream.expected/1000,2)}s），` +
+    `实测 ${fmt(r.stream.ms/1000,2)}s = <b>${fmt(r.stream.ratio,2)}×</b>，` +
+    `到达间隔中位 ${fmt(r.stream.gapMed,1)}ms、最大空档 ${fmt(r.stream.gapMax,0)}ms → ${strG?strG.t:'—'}` +
+    (isFinite(r.stream.kbs) && r.down.kbs > 0
+      ? `；流式有效速率 <b>${fmt(r.stream.kbs,r.stream.kbs<10?2:0)} KB/s</b>` +
+        (r.down.kbs <= 5000
+          ? `，是批量下行（${fmt(r.down.kbs,0)} KB/s）的 ${fmt(100*r.stream.kbs/r.down.kbs,0)}%`
+          : '')
+      : ''));
+
+  const ev = evaluate(r);
+  items.push(`<span class="tag ${ev.level}">结论</span> <b>${ev.label}</b> —— ${ev.note}`);
+
+  ul.innerHTML = items.map(x => `<li>${x}</li>`).join('');
+}
+
+/* ---------- 汇总表 ---------- */
+function stat(arr){
+  const v = arr.filter(x => isFinite(x) && x !== null);
+  if (!v.length) return null;
+  return {last: v[v.length-1], med: median(v),
+          best: Math.max(...v), worst: Math.min(...v), n: v.length};
+}
+function renderAgg(){
+  const rows = [
+    ['下行 KB/s', runs.map(r => r.down.kbs), true],
+    ['上行 KB/s', runs.map(r => r.up.kbs), true],
+    ['RTT ms',    runs.map(r => r.rtt.med), false],
+    ['冷连接 ms', runs.map(r => r.cold.med), false],
+    ['流式倍数',  runs.map(r => r.stream.ratio), false],
+  ];
+  const table = $('aggTable');
+  [...table.querySelectorAll('tr:not(:first-child)')].forEach(tr => tr.remove());
+  let has = false;
+  for (const [name, arr, higherBetter] of rows){
+    const s = stat(arr);
+    if (!s) continue;
+    has = true;
+    const d = name.includes('KB/s') ? (s.last<10?2:0) : (name.includes('倍数')?2:1);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${name}</td>` +
+      `<td class="n">${fmt(s.last,d)}</td><td class="n">${fmt(s.med,d)}</td>` +
+      `<td class="n">${fmt(higherBetter?s.best:s.worst,d)}</td>` +
+      `<td class="n">${fmt(higherBetter?s.worst:s.best,d)}</td>` +
+      `<td class="n">${s.n}</td>`;
+    table.appendChild(tr);
+  }
+  $('aggEmpty').style.display = has ? 'none' : 'block';
+}
+
+function renderHist(){
+  const table = $('histTable');
+  [...table.querySelectorAll('tr:not(:first-child)')].forEach(tr => tr.remove());
+  const list = [...runs].reverse().slice(0, 30);
+  $('histEmpty').style.display = list.length ? 'none' : 'block';
+  list.forEach(r => {
+    const ev = evaluate(r);
+    const asym = r.up.kbs>0 && r.down.kbs>0 ? r.up.kbs/r.down.kbs : NaN;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${r.time}</td>` +
+      `<td class="n">${fmt(r.rtt.med,0)}</td>` +
+      `<td class="n">${fmt(r.cold.med,0)}</td>` +
+      `<td class="n">${fmt(r.down.kbs, r.down.kbs<10?2:0)}</td>` +
+      `<td class="n">${fmt(r.up.kbs, r.up.kbs<10?2:0)}</td>` +
+      `<td class="n">${isFinite(asym)?fmt(asym,1)+'×':'—'}</td>` +
+      `<td class="n">${fmt(r.stream.ratio,2)}×</td>` +
+      `<td><span class="pill ${ev.level==='none'?'warn':ev.level}">${ev.label}</span></td>` +
+      `<td class="n"><button class="ghost" style="padding:2px 8px;font-size:11px" data-id="${r.id}">删除</button></td>`;
+    table.appendChild(tr);
+  });
+  table.querySelectorAll('button[data-id]').forEach(b => {
+    b.onclick = () => {
+      runs = runs.filter(x => String(x.id) !== b.dataset.id);
+      saveRuns();
+      if (lastRun && String(lastRun.id) === b.dataset.id) lastRun = runs.length ? runs[runs.length-1] : null;
+      renderSummary();
+    };
+  });
+}
+
+function drawHist(){
+  const c = $('histChart'), ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+  const list = runs.slice(-20);
+  if (!list.length){
+    ctx.fillStyle = '#8b93a7'; ctx.font = '12px sans-serif';
+    ctx.fillText('尚无记录', 8, H/2); return;
+  }
+  const pad = {l:6,r:6,t:8,b:16};
+  const max = Math.max(...list.map(r => Math.max(r.down.kbs, r.up.kbs)), 1) * 1.1;
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+  const slot = plotW / list.length;
+  const bw = Math.max(3, Math.min(14, slot*0.36));
+  ctx.strokeStyle = '#262b36'; ctx.lineWidth = 1;
+  for (let i=1;i<4;i++){ const y = pad.t + plotH*i/4; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke(); }
+  list.forEach((r, i) => {
+    const cx = pad.l + slot*i + slot/2;
+    const hD = clamp((r.down.kbs/max)*plotH, 1, plotH);
+    const hU = clamp((r.up.kbs/max)*plotH, 1, plotH);
+    ctx.fillStyle = '#5b8cff';
+    ctx.fillRect(cx - bw - 1, pad.t + plotH - hD, bw, hD);
+    ctx.fillStyle = '#3ddc97';
+    ctx.fillRect(cx + 1, pad.t + plotH - hU, bw, hU);
+  });
+  ctx.fillStyle = '#8b93a7'; ctx.font = '10px sans-serif';
+  ctx.fillText(fmt(max/1.1,0) + ' KB/s', pad.l, H-3);
+  ctx.fillText('第 ' + (runs.length - list.length + 1) + '–' + runs.length + ' 次', W-pad.r-70, H-3);
+}
+
+/* ---------- 单项测试 ---------- */
+async function loadEnv(){
+  $('envUrl').textContent = BASE;
+  const nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+  $('envProto').textContent = location.protocol.replace(':','').toUpperCase() +
+    (nav && nav.nextHopProtocol ? ' / ' + nav.nextHopProtocol : '');
+  const c = navigator.connection || {};
+  $('envVer').textContent = '2026-10-23d';
+  $('envNet').textContent = (c.effectiveType || c.downlink ?
+    [c.effectiveType, c.downlink ? '≈'+c.downlink+' Mbps' : '', c.rtt ? 'rtt≈'+c.rtt+'ms' : '']
+      .filter(Boolean).join(' · ') : '浏览器未提供');
+  try {
+    const r = await fetch(BASE + '/api/info?t=' + Date.now(), {cache:'no-store'});
+    const j = await r.json();
+    $('envIp').textContent = j.client + (j.xff ? '  (XFF: ' + j.xff + ')' : '');
+    $('envCf').textContent = j.cf_ray ? j.cf_ray + (j.cf_colo ? ' · ' + j.cf_colo : '') : '未经 Cloudflare（直连）';
+    $('envProto').textContent += ' / 服务端 ' + j.proto;
+  } catch(e){
+    $('envIp').textContent = '取不到（' + e.message + '）';
+  }
+}
+
+async function testRtt(n = 15){
+  setStatus('测试 RTT…');
+  const rtts = [];
+  await fetch(BASE + '/api/ping?t=' + Date.now(), {cache:'no-store'});
+  for (let i=0;i<n;i++){
+    const t0 = now();
+    const r = await fetch(BASE + '/api/ping?t=' + Date.now() + '&i=' + i, {cache:'no-store'});
+    await r.text();
+    rtts.push(now() - t0);
+    drawRtt(rtts);
+    await sleep(60);
+  }
+  const med = median(rtts);
+  $('rttMed').innerHTML = fmt(med,0) + '<span class="unit"> ms</span>';
+  $('rttDetail').textContent = `中位数 · ${rtts.length} 次 · ${rtts[0].toFixed(0)}→${rtts[rtts.length-1].toFixed(0)} ms`;
+  const cells = $('rttRow').children;
+  [Math.min(...rtts), med, pct(rtts,.9), Math.max(...rtts), stdev(rtts), rtts.length]
+    .forEach((v,i)=> cells[i].textContent = i===5 ? v : fmt(v,1));
+  log(`RTT 中位 ${fmt(med,1)}ms  最小 ${fmt(Math.min(...rtts),1)}  最大 ${fmt(Math.max(...rtts),1)}  抖动 ${fmt(stdev(rtts),1)}`);
+  return {min:Math.min(...rtts), med, p90:pct(rtts,.9), max:Math.max(...rtts), sd:stdev(rtts), n:rtts.length};
+}
+
+function drawRtt(vals){
+  const c = $('rttChart'), ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+  if (!vals.length) return;
+  const max = Math.max(...vals, 1) * 1.15;
+  ctx.strokeStyle = '#262b36'; ctx.lineWidth = 1;
+  for (let i=1;i<4;i++){ const y = H*i/4; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  ctx.beginPath();
+  vals.forEach((v,i)=>{
+    const x = vals.length===1 ? W/2 : i*(W-8)/(vals.length-1)+4;
+    const y = H - 6 - (v/max)*(H-12);
+    i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  });
+  ctx.strokeStyle = '#5b8cff'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#5b8cff';
+  vals.forEach((v,i)=>{
+    const x = vals.length===1 ? W/2 : i*(W-8)/(vals.length-1)+4;
+    const y = H - 6 - (v/max)*(H-12);
+    ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fill();
+  });
+}
+
+async function testCold(n = 5){
+  setStatus('测试冷连接…');
+  const vals = [];
+  for (let i=0;i<n;i++){
+    const t0 = now();
+    const r = await fetch(BASE + '/api/ping?close=1&t=' + Date.now() + '&n=' + i, {cache:'no-store'});
+    await r.text();
+    vals.push(now() - t0);
+    await sleep(250);
+  }
+  const med = median(vals);
+  $('coldMed').innerHTML = fmt(med,0) + '<span class="unit"> ms</span>';
+  const warm = parseFloat($('rttMed').textContent) || 0;
+  $('coldDetail').textContent =
+    `中位数 · ${vals.length} 次 · ${fmt(Math.min(...vals),0)}→${fmt(Math.max(...vals),0)} ms` +
+    ` · 比复用连接多 ${fmt(Math.max(0, med - warm),0)} ms`;
+  log(`冷连接 中位 ${fmt(med,1)}ms`);
+  return {med, min:Math.min(...vals), max:Math.max(...vals), n:vals.length};
+}
+
+async function testDown(kbSize = 4096){
+  setStatus(`下载 ${kb(kbSize*1024)}…`);
+  const t0 = now();
+  const r = await fetch(BASE + '/api/download?kb=' + kbSize + '&t=' + Date.now(), {cache:'no-store'});
+  const reader = r.body.getReader();
+  let got = 0, firstByteAt = 0;
+  while (true){
+    const {done, value} = await reader.read();
+    if (done) break;
+    if (!firstByteAt) firstByteAt = now();
+    got += value.length;
+  }
+  const total = now() - t0;
+  const transfer = Math.max(1, now() - firstByteAt);
+  const kbs = (got/1024) / (transfer/1000);
+  $('dlSize').textContent = kb(got);
+  $('dlTime').textContent = fmt(total/1000,2) + ' s';
+  $('dlRate').textContent = fmt(kbs, kbs<10?2:0) + ' KB/s';
+  $('dlVerdict').innerHTML = rateVerdict(kbs);
+  log(`下行 ${kb(got)} / ${fmt(total/1000,2)}s = ${fmt(kbs,kbs<10?2:0)} KB/s（首字节 ${fmt(firstByteAt-t0,0)}ms）`);
+  return {bytes:got, ms:total, kbs, ttfb:firstByteAt-t0};
+}
+
+async function testUp(kbSize = 2048){
+  setStatus(`上传 ${kb(kbSize*1024)}…`);
+  const buf = new Uint8Array(kbSize*1024);
+  for (let i=0;i<buf.length;i+=65536) buf[i] = i & 255;
+  const t0 = now();
+  const r = await fetch(BASE + '/api/upload?t=' + Date.now(), {
+    method:'POST', body:buf, cache:'no-store',
+    headers:{'Content-Type':'application/octet-stream'}
+  });
+  const j = await r.json();
+  const dt = Math.max(1, now() - t0);
+  const kbs = (j.received/1024) / (dt/1000);
+  $('ulSize').textContent = kb(j.received);
+  $('ulTime').textContent = fmt(dt/1000,2) + ' s';
+  $('ulRate').textContent = fmt(kbs, kbs<10?2:0) + ' KB/s';
+  $('ulVerdict').innerHTML = rateVerdict(kbs);
+  log(`上行 ${kb(j.received)} / ${fmt(dt/1000,2)}s = ${fmt(kbs,kbs<10?2:0)} KB/s`);
+  return {bytes:j.received, ms:dt, kbs};
+}
+
+async function testStream(chunks = 250, size = 8192, interval = 20){
+  setStatus('测试流式到达节奏…');
+  const t0 = now();
+  const r = await fetch(BASE + `/api/stream?chunks=${chunks}&size=${size}&interval=${interval}&t=` + Date.now(),
+                        {cache:'no-store'});
+  const reader = r.body.getReader();
+  const arrivals = [];
+  while (true){
+    const {done, value} = await reader.read();
+    if (done) break;
+    arrivals.push(now() - t0);
+  }
+  const gaps = [];
+  for (let i=1;i<arrivals.length;i++) gaps.push(arrivals[i]-arrivals[i-1]);
+  const totalMs = arrivals.length > 1 ? arrivals[arrivals.length-1] - arrivals[0] : 0;
+  const med = gaps.length ? median(gaps) : 0;
+  const mx  = gaps.length ? Math.max(...gaps) : 0;
+  const expected = chunks * interval;
+  const ratio = totalMs / expected;
+  $('stCount').textContent = arrivals.length + ' 次读取';
+  $('stMed').textContent = fmt(med,1) + ' ms';
+  $('stMax').textContent = fmt(mx,0) + ' ms';
+  const g = gradeStream(ratio, mx);
+  $('stVerdict').innerHTML = pill(g, `${fmt(ratio,2)}× / 空档 ${fmt(mx,0)}ms`);
+  log(`流式：服务器 ${chunks}×${kb(size)} 每 ${interval}ms，客户端收到 ${arrivals.length} 批，` +
+      `实际 ${fmt(totalMs/1000,2)}s / 预期 ${fmt(expected/1000,2)}s（${fmt(ratio,2)}×），` +
+      `间隔中位 ${fmt(med,1)}ms，最大空档 ${fmt(mx,0)}ms`);
+  const bytes = arrivals.length * size;
+  const kbs = totalMs > 0 ? (bytes/1024)/(totalMs/1000) : NaN;
+  return {chunks, size, interval, batches:arrivals.length, ms:totalMs, bytes, kbs,
+          expected, ratio:isFinite(ratio)?ratio:NaN, gapMed:med, gapMax:mx};
+}
+
+/* ---------- 编排 ---------- */
+async function runSuite(opts){
+  if (busy) return;
+  busy = true;
+  $('run').disabled = $('runAll').disabled = true;
+  $('log').textContent = '';
+  try {
+    const rtt = await testRtt(opts.rtt);
+    const cold = await testCold(opts.cold);
+    const down = await testDown(opts.down);
+    const up = await testUp(opts.up);
+    const stream = await testStream(opts.chunks, opts.size, opts.interval);
+    const run = {
+      id: String(Date.now()),
+      ts: Date.now(),
+      time: new Date().toLocaleString('zh-CN', {hour12:false}),
+      url: BASE,
+      rtt, cold, down, up, stream
+    };
+    pushRun(run);
+    log('完成。已记入汇总。');
+    showTab('sum');
+  } catch(e){
+    log('出错：' + e.message);
+    setStatus('出错');
+  } finally {
+    busy = false;
+    $('run').disabled = $('runAll').disabled = false;
+    setStatus('');
+  }
+}
+
+$('run').onclick = () => runSuite({rtt:15, cold:5, down:4096, up:2048,
+                                  chunks:250, size:8192, interval:20});
+$('runAll').onclick = () => runSuite({rtt:30, cold:8, down:8192, up:4096,
+                                     chunks:400, size:8192, interval:20});
+
+/* ---------- 标签页 ---------- */
+function showTab(which){
+  const t = which === 'sum';
+  $('pageTest').classList.toggle('hidden', t);
+  $('pageSum').classList.toggle('hidden', !t);
+  $('tabTest').classList.toggle('on', !t);
+  $('tabSum').classList.toggle('on', t);
+  if (t) renderSummary();
+}
+$('tabTest').onclick = () => showTab('test');
+$('tabSum').onclick = () => showTab('sum');
+
+/* ---------- 导出 ---------- */
+function summaryText(){
+  const r = lastRun || runs[runs.length-1];
+  if (!r) return '尚无测试记录。';
+  const ev = evaluate(r);
+  const asym = r.up.kbs>0 && r.down.kbs>0 ? r.up.kbs/r.down.kbs : NaN;
+  return [
+    '本地 → 服务器 链路测试',
+    '时间: ' + r.time,
+    '地址: ' + r.url,
+    '',
+    '整体评价: ' + ev.label,
+    ev.note,
+    '',
+    `RTT 中位: ${fmt(r.rtt.med,1)} ms（抖动 ${fmt(r.rtt.sd,1)} ms，p90 ${fmt(r.rtt.p90,1)}）`,
+    `冷连接  : ${fmt(r.cold.med,1)} ms`,
+    `下行    : ${fmt(r.down.kbs,2)} KB/s（${kb(r.down.bytes)} / ${fmt(r.down.ms/1000,2)}s）`,
+    `上行    : ${fmt(r.up.kbs,2)} KB/s（${kb(r.up.bytes)} / ${fmt(r.up.ms/1000,2)}s）`,
+    `上/下行 : ${isFinite(asym)?fmt(asym,1)+'×':'—'}`,
+    `流式    : ${fmt(r.stream.ratio,2)}×（理论 ${fmt(r.stream.expected/1000,2)}s，实测 ${fmt(r.stream.ms/1000,2)}s，` +
+      `间隔中位 ${fmt(r.stream.gapMed,1)}ms，最大空档 ${fmt(r.stream.gapMax,0)}ms）`,
+    `流式速率: ${fmt(r.stream.kbs, r.stream.kbs<10?2:0)} KB/s（批量下行的 ${fmt(100*r.stream.kbs/Math.max(1,r.down.kbs),0)}%）`,
+    '',
+    `历史记录: ${runs.length} 条`
+  ].join('\n');
+}
+$('copySum').onclick = async () => {
+  const txt = summaryText();
+  try {
+    await navigator.clipboard.writeText(txt);
+    $('copySum').textContent = '已复制';
+  } catch(e){
+    const ta = document.createElement('textarea');
+    ta.value = txt; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    $('copySum').textContent = '已复制';
+  }
+  setTimeout(() => $('copySum').textContent = '复制汇总', 1500);
+};
+$('exportJson').onclick = () => {
+  const blob = new Blob([JSON.stringify({exportedAt:new Date().toISOString(), runs}, null, 2)],
+                        {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'latency-runs-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('clearHist').onclick = () => {
+  if (!confirm('清空全部 ' + runs.length + ' 条记录？')) return;
+  runs = []; lastRun = null; saveRuns(); renderSummary();
+};
+
+loadEnv();
+renderSummary();
+</script>
+</body>
+</html>
